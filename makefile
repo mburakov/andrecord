@@ -1,4 +1,4 @@
-TARGET_PLATFORM=android-14
+TARGET_PLATFORM=android-27
 BUILD_TOOLS_VERSION=27.0.3
 
 BUILD_TOOLS=$(ANDROID_HOME)/build-tools/$(BUILD_TOOLS_VERSION)
@@ -15,9 +15,8 @@ andrecord.apk: keystore.jks build/andrecord.aligned.apk
 		build/andrecord.aligned.apk
 
 keystore.jks:
-	$(BUILD_TOOLS)/keytool -genkeypair -keystore keystore.jks \
-		-alias androidkey -validity 10000 -keyalg RSA -keysize 2048 \
-		-storepass android -keypass android
+	keytool -genkeypair -keystore keystore.jks -alias androidkey -validity 10000 \
+		-keyalg RSA -keysize 2048 -storepass android -keypass android
 
 build/andrecord.aligned.apk: build/andrecord.unsigned.apk
 	$(BUILD_TOOLS)/zipalign -f 4 build/andrecord.unsigned.apk \
