@@ -11,18 +11,17 @@
 #include <netinet/in.h>
 #include <sys/wait.h>
 
-static void handler(int sig) {
-    (void)sig;
-}
+#define PIPE_FILE "/tmp/pamnc.pipe"
 
-static int bufsize(int sock) {
-    int optval;
-    socklen_t optlen = sizeof(optval);
-    int result = getsockopt(sock, SOL_SOCKET, SO_RCVBUF, &optval, &optlen);
-    return result == -1 ? -1 : optval;
-}
+static void handler(int sig) { (void)sig; }
 
-static int loop(int from, int to, int size) {
+static int loop(int from, int to, int size, int port) {
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = INADDR_BROADCAST;
+    // TODO(mburakov): Send broadcast pings to port
     char buffer[size];
     int length = read(from, buffer, size);
     if (length == -1) {
@@ -51,7 +50,6 @@ static int pactl(int argc, ...) {
     }
     argv[argc + 1] = NULL;
     va_end(args);
-
     switch (fork()) {
         case -1:
             perror("Failed to fork");
@@ -71,61 +69,72 @@ static int pactl(int argc, ...) {
     return result == EXIT_SUCCESS;
 }
 
-int main(int argc, char** argv) {
-    int result = EXIT_FAILURE;
-    int fds[] = {-1, -1};
+static int make_socket(int* bufsize) {
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock == -1) {
+        perror("Failed to create socket");
+        return -1;
+    }
     do {
-        int port = argc > 1 ? atoi(argv[1]) : 0;
-        if (!port) {
-            fprintf(stderr, "Usage: %s <udp_port>\n", argv[0]);
-            break;
-        }
-        struct sigaction act;
-        memset(&act, 0, sizeof(act));
-        act.sa_handler = handler;
-        if (sigaction(SIGINT, &act, NULL) == -1) {
-            perror("Failed to set up signal handler");
-            break;
-        }
-        if ((fds[0] = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-            perror("Failed to create socket");
-            break;
-        }
-        int size = bufsize(fds[0]);
-        if (size == -1) {
+        socklen_t len = sizeof(*bufsize);
+        if (getsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, &len) == -1) {
             perror("Failed to get socket buffer size");
             break;
         }
-        struct sockaddr_in addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(port);
-        if (bind(fds[0], (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-            perror("Failed to bind socket");
+        int broadcast = 1;
+        if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast,
+                       sizeof(broadcast)) == -1) {
+            perror("Failed to enable broadcast");
             break;
         }
-        int pares = pactl(7, "load-module", "module-pipe-source",
-                          "source_name=pamnc", "file=/tmp/pamnc.pipe",
-                          "format=s16le", "rate=16000", "channels=1");
-        if (!pares) {
-            break;
-        }
-        if ((fds[1] = open("/tmp/pamnc.pipe", O_WRONLY)) == -1) {
-            perror("Failed to open pipe");
-            break;
-        }
-        if (unlink("/tmp/pamnc.pipe")) {
-            perror("Failed to unlink pipe");
-            break;
-        }
-        while (loop(fds[0], fds[1], size))
-            ;
-    } while (result = EXIT_SUCCESS, 0);
-    FOR_EACH (int* i, fds) {
+        return sock;
+    } while (0);
+    if (close(sock) == -1) {
+        perror("Failed to close socket");
+    }
+    return -1;
+}
+
+int make_pipe() {
+    int pares = pactl(7, "load-module", "module-pipe-source",
+                      "source_name=pamnc", "file=" PIPE_FILE, "format=s16le",
+                      "rate=16000", "channels=1");
+    if (!pares) {
+        return -1;
+    }
+    int pipe = open(PIPE_FILE, O_WRONLY);
+    if (pipe == -1) {
+        perror("Failed to open pipe");
+        return -1;
+    }
+    if (unlink(PIPE_FILE) == -1) {
+        perror("Failed to unlink pipe");
+    }
+    return pipe;
+}
+
+int main(int argc, char** argv) {
+    int port = argc > 1 ? atoi(argv[1]) : 0;
+    if (!port) {
+        fprintf(stderr, "Usage: %s <udp_port>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+    struct sigaction act;
+    memset(&act, 0, sizeof(act));
+    act.sa_handler = handler;
+    if (sigaction(SIGINT, &act, NULL) == -1) {
+        perror("Failed to set up signal handler");
+        return EXIT_FAILURE;
+    }
+    int buffer_size;
+    int fds[] = {make_socket(&buffer_size), make_pipe()};
+    int err = fds[0] == -1 || fds[1] == -1;
+    while (!err && loop(fds[0], fds[1], buffer_size, port));
+    FOR_EACH(int* i, fds) {
         if (*i != -1 && close(*i) == -1) {
             perror("Failed to close fd");
         }
     }
     pactl(2, "unload-module", "module-pipe-source");
-    return result;
+    return err ? EXIT_FAILURE : EXIT_SUCCESS;
 }

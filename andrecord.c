@@ -17,6 +17,7 @@
 
 #define BUFFER_COUNT 4
 #define KICKSTART_COUNT 3
+#define BROADCAST_IFACE "wlan0"
 
 struct Instance {
     int sample_rate;
@@ -176,7 +177,7 @@ static void OnActivityResume(ANativeActivity* activity) {
         }
         int sample_size = SL_PCMSAMPLEFORMAT_FIXED_16 >> 3;
         instance->buffer_size = frames_per_buffer * sample_size;
-        if (!GetBroadcastAddr(activity->env, activity->clazz, "wlan0",
+        if (!GetBroadcastAddr(activity->env, activity->clazz, BROADCAST_IFACE,
                               &instance->broadcast_addr)) {
             LOG(ERROR, "Failed to get wifi broadcast address");
             break;
