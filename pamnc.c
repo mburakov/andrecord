@@ -1,35 +1,45 @@
-#include "utils.h"
-
 #include <fcntl.h>
-#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
 #include <netinet/in.h>
+#include <sys/poll.h>
 #include <sys/wait.h>
 
 #define PIPE_FILE "/tmp/pamnc.pipe"
+#define UNDERFLOW_TIMEOUT 1000
 
 static void handler(int sig) { (void)sig; }
 
-static int loop(int from, int to, int size, int port) {
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_BROADCAST;
-    // TODO(mburakov): Send broadcast pings to port
-    char buffer[size];
-    int length = read(from, buffer, size);
+static int loop(int in, int out, int buffer_size, const struct sockaddr* addr) {
+    char buffer[buffer_size];
+    struct pollfd fds = {
+        .fd = in,
+        .events = POLLIN
+    };
+    int result = poll(&fds, 1, UNDERFLOW_TIMEOUT);
+    switch (result) {
+        case -1:
+            perror("Failed to poll socket");
+            return 0;
+        case 0:
+            if (sendto(in, NULL, 0, 0, addr, sizeof(*addr))) {
+                perror("Failed to send broadcast");
+                return 0;
+            }
+            return 1;
+        default:
+            break;
+    }
+    int length = read(in, buffer, buffer_size);
     if (length == -1) {
         perror("Failed to read socket");
         return 0;
     }
     for (char* ptr = buffer; length > 0;) {
-        int written = write(to, ptr, length);
+        int written = write(out, ptr, length);
         if (written == -1) {
             perror("Failed to write pipe");
             return 0;
@@ -87,6 +97,10 @@ static int make_socket(int* bufsize) {
             perror("Failed to enable broadcast");
             break;
         }
+        if (fcntl(sock, F_SETFL, O_NONBLOCK) == -1) {
+            perror("Failed to make socket non-blocking");
+            break;
+        }
         return sock;
     } while (0);
     if (close(sock) == -1) {
@@ -95,7 +109,7 @@ static int make_socket(int* bufsize) {
     return -1;
 }
 
-int make_pipe() {
+static int make_pipe() {
     int pares = pactl(7, "load-module", "module-pipe-source",
                       "source_name=pamnc", "file=" PIPE_FILE, "format=s16le",
                       "rate=16000", "channels=1");
@@ -119,22 +133,34 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Usage: %s <udp_port>\n", argv[0]);
         return EXIT_FAILURE;
     }
-    struct sigaction act;
-    memset(&act, 0, sizeof(act));
+    struct sigaction act = {
+        .sa_handler = handler
+    };
     act.sa_handler = handler;
     if (sigaction(SIGINT, &act, NULL) == -1) {
         perror("Failed to set up signal handler");
         return EXIT_FAILURE;
     }
     int buffer_size;
-    int fds[] = {make_socket(&buffer_size), make_pipe()};
-    int err = fds[0] == -1 || fds[1] == -1;
-    while (!err && loop(fds[0], fds[1], buffer_size, port));
-    FOR_EACH(int* i, fds) {
-        if (*i != -1 && close(*i) == -1) {
-            perror("Failed to close fd");
+    int in = make_socket(&buffer_size);
+    if (in == -1) {
+        return EXIT_FAILURE;
+    }
+    int out = make_pipe();
+    if (out != -1) {
+        struct sockaddr_in addr = {
+            .sin_family = AF_INET,
+            .sin_port = htons(port),
+            .sin_addr.s_addr = INADDR_BROADCAST
+        };
+        while (loop(in, out, buffer_size, (struct sockaddr*)&addr));
+        if (close(out) == -1) {
+            perror("Failed to close pipe");
         }
     }
+    if (close(in) == -1) {
+        perror("Failed to close socket");
+    }
     pactl(2, "unload-module", "module-pipe-source");
-    return err ? EXIT_FAILURE : EXIT_SUCCESS;
+    return in == -1 || out == -1 ? EXIT_FAILURE : EXIT_SUCCESS;
 }
