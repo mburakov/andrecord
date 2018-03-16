@@ -17,12 +17,11 @@
 
 #define BUFFER_COUNT 4
 #define KICKSTART_COUNT 3
-#define BROADCAST_IFACE "wlan0"
 
 struct Instance {
     int sample_rate;
     int buffer_size;
-    uint32_t broadcast_addr;
+    //uint32_t broadcast_addr;
     ANativeActivity* activity;
     atomic_flag running;
     pthread_t thread;
@@ -60,19 +59,23 @@ static void ThreadLoop(struct Instance* instance, SLRecordItf recorder,
         LOG(ERROR, "Failed to start recording (%s)", SlResultString(result));
         goto shortcut;
     }
+    /*
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(12345);
     addr.sin_addr.s_addr = instance->broadcast_addr;
+    */
     while (atomic_flag_test_and_set(&instance->running)) {
         void* buffer = BufferQueuePop(&instance->queue_impl[2], 1);
+        /*
         ssize_t sent = sendto(fd, buffer, instance->buffer_size, 0,
                               (struct sockaddr*)&addr, sizeof(addr));
         if (sent != instance->buffer_size) {
             LOG(ERROR, "Failed to send data (%s)", strerror(errno));
             goto shortcut;
         }
+        */
         BufferQueuePush(&instance->queue_impl[0], buffer);
     }
 shortcut:
@@ -137,13 +140,6 @@ static void* ThreadProc(void* arg) {
             LOG(ERROR, "Failed to create socket (%s)", strerror(errno));
             break;
         }
-        int broadcast = 1;
-        if (setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &broadcast,
-                       sizeof(broadcast)) == -1) {
-            LOG(ERROR, "Failed to enable broadcast on socket (%s)",
-                strerror(errno));
-            break;
-        }
         ThreadLoop(arg, recorder_iface, queue_iface, fd);
     } while (0);
     if (recorder_obj) {
@@ -177,11 +173,13 @@ static void OnActivityResume(ANativeActivity* activity) {
         }
         int sample_size = SL_PCMSAMPLEFORMAT_FIXED_16 >> 3;
         instance->buffer_size = frames_per_buffer * sample_size;
+        /*
         if (!GetBroadcastAddr(activity->env, activity->clazz, BROADCAST_IFACE,
                               &instance->broadcast_addr)) {
             LOG(ERROR, "Failed to get wifi broadcast address");
             break;
         }
+        */
         instance->activity = activity;
         atomic_flag_test_and_set(&instance->running);
         if (pthread_create(&instance->thread, NULL, ThreadProc, instance)) {

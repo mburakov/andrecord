@@ -1,5 +1,7 @@
 #include "bufqueue.h"
 
+#include <sched.h>
+
 #ifdef ENABLE_QUEUE_LOGGING
 #include "utils.h"
 #include <android/log.h>
@@ -33,7 +35,11 @@ void* BufferQueuePop(struct BufferQueue* queue, int blocking) {
     int empty;
     do {
         empty = IsQueueEmpty(queue);
-    } while (empty && blocking);
+        if (empty && blocking) {
+            sched_yield();
+            continue;
+        }
+    } while (0);
     if (empty) {
 #ifdef ENABLE_QUEUE_LOGGING
         LOG(DEBUG, "%s(%p, 0) -> NULL", __func__, (void*)queue);
