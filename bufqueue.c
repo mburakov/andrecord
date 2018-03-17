@@ -32,15 +32,11 @@ void BufferQueuePush(struct BufferQueue* queue, void* buffer) {
 }
 
 void* BufferQueuePop(struct BufferQueue* queue, int blocking) {
-  int empty;
-  do {
-    empty = IsQueueEmpty(queue);
-    if (empty && blocking) {
-      sched_yield();
-      continue;
-    }
-  } while (0);
-  if (empty) {
+  int empty = blocking ? 0 : IsQueueEmpty(queue);
+  while (blocking && IsQueueEmpty(queue)) {
+    sched_yield();
+  }
+  if (empty && !blocking) {
 #ifdef ENABLE_QUEUE_LOGGING
     LOG(DEBUG, "%s(%p, 0) -> NULL", __func__, (void*)queue);
 #endif  // ENABLE_QUEUE_LOGGING
