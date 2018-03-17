@@ -102,10 +102,11 @@ static int make_socket(int* bufsize) {
   return -1;
 }
 
-static int make_pipe() {
-  int pares =
-      pactl(7, "load-module", "module-pipe-source", "source_name=pamnc",
-            "file=" PIPE_FILE, "format=s16le", "rate=16000", "channels=1");
+static int make_pipe(int sample_rate) {
+  char rate[16];
+  snprintf(rate, sizeof(rate), "rate=%d", sample_rate);
+  int pares = pactl(7, "load-module", "module-pipe-source", "source_name=pamnc",
+                    "file=" PIPE_FILE, "format=s16le", rate, "channels=1");
   if (!pares) {
     return -1;
   }
@@ -121,9 +122,9 @@ static int make_pipe() {
 }
 
 int main(int argc, char** argv) {
-  int port = argc > 1 ? atoi(argv[1]) : 0;
-  if (!port) {
-    fprintf(stderr, "Usage: %s <udp_port>\n", argv[0]);
+  int sample_rate = argc > 1 ? atoi(argv[1]) : 0;
+  if (!sample_rate) {
+    fprintf(stderr, "Usage: %s <sample_rate>\n", argv[0]);
     return EXIT_FAILURE;
   }
   struct sigaction act = {.sa_handler = handler};
@@ -137,10 +138,10 @@ int main(int argc, char** argv) {
   if (in == -1) {
     return EXIT_FAILURE;
   }
-  int out = make_pipe();
+  int out = make_pipe(sample_rate);
   if (out != -1) {
     struct sockaddr_in addr = {.sin_family = AF_INET,
-                               .sin_port = htons(port),
+                               .sin_port = htons(12345),
                                .sin_addr.s_addr = INADDR_BROADCAST};
     while (loop(in, out, buffer_size, (struct sockaddr*)&addr))
       ;
