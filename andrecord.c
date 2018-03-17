@@ -21,7 +21,7 @@
 struct Instance {
   int sample_rate;
   int buffer_size;
-  // uint32_t broadcast_addr;
+  jobject multicast_lock;
   ANativeActivity* activity;
   atomic_flag running;
   pthread_t thread;
@@ -165,15 +165,16 @@ static void OnActivityResume(ANativeActivity* activity) {
       LOG(ERROR, "Failed to get buffer configuration");
       break;
     }
+    LOG(INFO, "Audio configuration sample_rate=%d, frames_per_buffer=%d",
+        instance->sample_rate, frames_per_buffer);
     int sample_size = SL_PCMSAMPLEFORMAT_FIXED_16 >> 3;
     instance->buffer_size = frames_per_buffer * sample_size;
-    /*
-    if (!GetBroadcastAddr(activity->env, activity->clazz, BROADCAST_IFACE,
-                          &instance->broadcast_addr)) {
-        LOG(ERROR, "Failed to get wifi broadcast address");
-        break;
+    instance->multicast_lock = NULL;
+    if (!AcquireMulticastLock(activity->env, activity->clazz, "andrecord",
+                              &instance->multicast_lock)) {
+      LOG(ERROR, "Failed to acquire multicast lock");
+      break;
     }
-    */
     instance->activity = activity;
     atomic_flag_test_and_set(&instance->running);
     if (pthread_create(&instance->thread, NULL, ThreadProc, instance)) {
@@ -184,6 +185,9 @@ static void OnActivityResume(ANativeActivity* activity) {
     return;
   } while (0);
   if (instance) {
+    if (instance->multicast_lock) {
+      ReleaseMulticastLock(activity->env, instance->multicast_lock);
+    }
     free(instance);
   }
 }
@@ -199,6 +203,7 @@ static void OnActivityPause(ANativeActivity* activity) {
   if (pthread_join(instance->thread, NULL)) {
     LOG(ERROR, "Failed to join thread (%s)", strerror(errno));
   }
+  ReleaseMulticastLock(activity->env, instance->multicast_lock);
   free(instance);
 }
 
