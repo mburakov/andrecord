@@ -10,7 +10,7 @@ TOOLCHAIN := $(ANDROID_NDK)/toolchains/arm-linux-androideabi-4.9
 CC := $(TOOLCHAIN)/prebuilt/linux-x86_64/bin/arm-linux-androideabi-gcc
 CFLAGS := -std=gnu11 -Wall -Wextra -pedantic -O3 -fvisibility=hidden \
 	-I$(ANDROID_NDK_INCLUDES) -I$(ANDROID_NDK_INCLUDES)/arm-linux-androideabi
-LDFLAGS := -O3 -s -shared -fvisibility=hidden -llog -lOpenSLES \
+LDFLAGS := -O3 -s -shared -fvisibility=hidden -landroid -llog -lOpenSLES \
 	--sysroot $(ANDROID_NDK_PLATFORM)/arch-arm
 
 sources := $(filter-out pamnc.c,$(wildcard *.c))

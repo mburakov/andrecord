@@ -168,6 +168,7 @@ static void* ThreadProc(void* arg) {
 
 static void OnActivityResume(ANativeActivity* activity) {
   LOG(DEBUG, "Entering %s(%p)", __func__, (void*)activity);
+  ANativeActivity_setWindowFlags(activity, AWINDOW_FLAG_KEEP_SCREEN_ON, 0);
   struct Instance* instance = (struct Instance*)malloc(sizeof(struct Instance));
   do {
     if (!instance) {
