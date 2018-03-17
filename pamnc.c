@@ -84,7 +84,7 @@ static int make_socket(int* bufsize) {
   }
   do {
     socklen_t len = sizeof(*bufsize);
-    if (getsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, &len) == -1) {
+    if (getsockopt(sock, SOL_SOCKET, SO_RCVBUF, bufsize, &len) == -1) {
       perror("Failed to get socket buffer size");
       break;
     }
@@ -92,10 +92,6 @@ static int make_socket(int* bufsize) {
     if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast,
                    sizeof(broadcast)) == -1) {
       perror("Failed to enable broadcast");
-      break;
-    }
-    if (fcntl(sock, F_SETFL, O_NONBLOCK) == -1) {
-      perror("Failed to make socket non-blocking");
       break;
     }
     return sock;

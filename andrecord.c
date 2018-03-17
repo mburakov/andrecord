@@ -8,7 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <pthread.h>
 
 #include <android/log.h>
@@ -27,6 +27,17 @@ struct Instance {
   pthread_t thread;
   struct BufferQueue* queue_impl;
 };
+
+static int ScanClients(int fd, struct sockaddr* addr) {
+  socklen_t addr_len = sizeof(*addr);
+  int result = recvfrom(fd, NULL, 0, MSG_DONTWAIT, addr, &addr_len);
+  if (!result) {
+    struct in_addr in = ((struct sockaddr_in*)addr)->sin_addr;
+    uint16_t port = ((struct sockaddr_in*)addr)->sin_port;
+    LOG(INFO, "Client discovered at %s:%u", inet_ntoa(in), ntohs(port));
+  }
+  return !result || errno == EAGAIN;
+}
 
 static void ThreadLoop(struct Instance* instance, SLRecordItf recorder,
                        SLAndroidSimpleBufferQueueItf queue, int fd) {
@@ -57,23 +68,22 @@ static void ThreadLoop(struct Instance* instance, SLRecordItf recorder,
     LOG(ERROR, "Failed to start recording (%s)", SlResultString(result));
     goto shortcut;
   }
-  /*
-  struct sockaddr_in addr;
+  struct sockaddr addr;
   memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(12345);
-  addr.sin_addr.s_addr = instance->broadcast_addr;
-  */
   while (atomic_flag_test_and_set(&instance->running)) {
     void* buffer = BufferQueuePop(&instance->queue_impl[2], 1);
-    /*
-    ssize_t sent = sendto(fd, buffer, instance->buffer_size, 0,
-                          (struct sockaddr*)&addr, sizeof(addr));
-    if (sent != instance->buffer_size) {
-        LOG(ERROR, "Failed to send data (%s)", strerror(errno));
-        goto shortcut;
+    if (!ScanClients(fd, &addr)) {
+      LOG(ERROR, "Failed to scan clients (%s)", strerror(errno));
+      break;
     }
-    */
+    if (addr.sa_family) {
+      ssize_t sent =
+          sendto(fd, buffer, instance->buffer_size, 0, &addr, sizeof(addr));
+      if (sent != instance->buffer_size) {
+        LOG(ERROR, "Failed to send data (%s)", strerror(errno));
+        break;
+      }
+    }
     BufferQueuePush(&instance->queue_impl[0], buffer);
   }
 shortcut:
@@ -134,6 +144,11 @@ static void* ThreadProc(void* arg) {
     fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd == -1) {
       LOG(ERROR, "Failed to create socket (%s)", strerror(errno));
+      break;
+    }
+    struct sockaddr_in addr = {.sin_family = AF_INET, .sin_port = htons(12345)};
+    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+      LOG(ERROR, "Failed to bind socket (%s)", strerror(errno));
       break;
     }
     ThreadLoop(arg, recorder_iface, queue_iface, fd);
